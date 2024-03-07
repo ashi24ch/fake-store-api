@@ -1,0 +1,99 @@
+Step 1: Extract data from fakestoreAPI
+
+import requests
+import pandas as pd
+
+# Define API endpoints
+product_url = "https://fakestoreapi.com/products"
+cart_url = "https://fakestoreapi.com/carts"
+users_url = "https://fakestoreapi.com/users"
+
+# Fetch data from the endpoints
+products = requests.get(product_url).json()
+carts = requests.get(cart_url).json()
+users = requests.get(users_url).json()
+
+# Convert data to dataframes
+products_df = pd.DataFrame(products)
+carts_df = pd.DataFrame(carts)
+users_df = pd.DataFrame(users)
+
+# Perform data formatting
+# Example 1: Convert 'created_at' column to datetime
+carts_df['created_at'] = pd.to_datetime(carts_df['created_at'])
+
+# Example 2: Convert 'price' column to numeric
+products_df['price'] = pd.to_numeric(products_df['price'], errors='coerce')
+
+# Example 3: Convert 'last_login' column to datetime in users_df
+users_df['last_login'] = pd.to_datetime(users_df['last_login'], errors='coerce')
+
+# Save dataframes to staging or intermediate tables (optional)
+# Example: Save DataFrames to CSV files
+products_df.to_csv('staging/products_staging.csv', index=False)
+carts_df.to_csv('staging/carts_staging.csv', index=False)
+users_df.to_csv('staging/users_staging.csv', index=False)
+
+
+
+Step 2: Load data into GCP BigQuery
+
+from google.cloud import bigquery
+from google.oauth2 import service_account
+
+# Set up BigQuery credentials
+credentials = service_account.Credentials.from_service_account_file('path/to/your/keyfile.json')
+client = bigquery.Client(credentials=credentials, project='your-project-id')
+
+# Define dataset and table names
+dataset_id = 'your_dataset'
+products_table_id = 'products'
+carts_table_id = 'carts'
+users_table_id = 'users'
+
+# Load data into BigQuery
+def load_data_to_bigquery(df, table_id):
+    table_ref = client.dataset(dataset_id).table(table_id)
+    job_config = bigquery.LoadJobConfig()
+    job_config.write_disposition = bigquery.WriteDisposition.WRITE_TRUNCATE  # or WRITE_APPEND if needed
+    job = client.load_table_from_dataframe(df, table_ref, job_config=job_config)
+    job.result()
+
+# Load dataframes into BigQuery
+load_data_to_bigquery(products_df, products_table_id)
+load_data_to_bigquery(carts_df, carts_table_id)
+load_data_to_bigquery(users_df, users_table_id)
+
+
+
+Step 3: Write dbt-ready SQL transformations
+Create a dbt model file (e.g., carts_model.sql)
+
+
+-- File: models/carts_model.sql
+
+WITH cart_events AS (
+    SELECT
+        c.cart_id,
+        c.user_id,
+        p.product_id,
+        c.created_at as cart_created_at,
+        -- Add more columns as needed
+    FROM
+        `your_project_id.your_dataset.carts` c
+    JOIN
+        `your_project_id.your_dataset.products` p
+    ON
+        c.product_id = p.product_id
+    -- Add more joins as needed
+)
+
+-- Further transformations and aggregations as needed
+SELECT
+    cart_id,
+    user_id,
+    product_id,
+    cart_created_at,
+    -- Add more columns as needed
+FROM
+    cart_events;
